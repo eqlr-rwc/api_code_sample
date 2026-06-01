@@ -1,2 +1,11 @@
 env/
+venv/
+.env
+.env/
+.venv/
+
 service_account.json
+skey*.json
+
+__pycache__/
+*.py[cod]
