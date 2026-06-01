@@ -47,8 +47,13 @@ of the service account JSON file, so it does not need to be configured.
 
 ## Requirements
 
-- Python 3.7+
+- **Python 3.10 or newer** (required by the pinned dependency versions)
 - Dependencies listed in `requirements.txt`
+
+The expected Python version is enforced in two places so you find out early:
+`start.sh` checks it before creating the virtual environment, and `main.py`
+checks it on startup. A `.python-version` file is also included for
+[pyenv](https://github.com/pyenv/pyenv) users.
 
 ## Usage
 

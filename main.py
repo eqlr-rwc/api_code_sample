@@ -17,8 +17,18 @@ Default Service Account using Google ID token."""
 import http.client as httplib
 import json
 import os
+import sys
 import time
 import urllib
+
+# This sample requires Python 3.10+ (matching the pinned dependency versions).
+MIN_PYTHON = (3, 10)
+if sys.version_info < MIN_PYTHON:
+    sys.exit(
+        f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required, "
+        f"but you are running {sys.version.split()[0]}."
+    )
+
 import google.auth.crypt
 import google.auth.jwt
 import requests

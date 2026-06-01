@@ -4,6 +4,15 @@
 set -euo pipefail
 
 VENV_DIR="env"
+MIN_PY_MAJOR=3
+MIN_PY_MINOR=10
+
+# Require Python 3.10+ (the pinned dependencies do not support older versions).
+if ! python3 -c "import sys; sys.exit(0 if sys.version_info >= ($MIN_PY_MAJOR, $MIN_PY_MINOR) else 1)"; then
+    echo "Error: Python ${MIN_PY_MAJOR}.${MIN_PY_MINOR}+ is required, but found $(python3 --version 2>&1)." >&2
+    echo "Please install a newer Python and re-run ./start.sh" >&2
+    exit 1
+fi
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating virtual environment in ./$VENV_DIR ..."
