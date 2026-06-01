@@ -16,27 +16,29 @@ Default Service Account using Google ID token."""
 
 import http.client as httplib
 import json
+import os
 import time
 import urllib
 import google.auth.crypt
 import google.auth.jwt
 import requests
 import logging
+from dotenv import load_dotenv
 
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)s [%(filename)s:%(lineno)d] %(message)s', datefmt='%Y-%m-%d:%H:%M:%S', level=logging.INFO)
 
-### Please replace the below variables with approriate values shared by Equilar
-#Dev environment
-#SERVICE_ACCOUNT_EMAIL = "xxx@*.iam.gserviceaccount.com"
-#HOST = "api.equilar.cloud"
-#SERVICE_ACCOUNT_PRIVATE_FILE_PATH="./service_account.json"
-#KEY="A****************8Y"
+### Configuration is loaded from a .env file (see .env.example).
+### Replace the values there with the credentials shared by Equilar.
+load_dotenv()
 
-#Production environment
-SERVICE_ACCOUNT_EMAIL = "xxx@equilar-xxx.iam.gserviceaccount.com"
-HOST = "api.equilar.cloud"
-SERVICE_ACCOUNT_PRIVATE_FILE_PATH="./service_account.json"
-KEY="AI..."
+HOST = os.getenv("HOST", "api.equilar.cloud")
+SERVICE_ACCOUNT_PRIVATE_FILE_PATH = os.getenv("SERVICE_ACCOUNT_PRIVATE_FILE_PATH", "./service_account.json")
+KEY = os.getenv("KEY")
+
+# The service account email is read from the "client_email" field of the
+# service account JSON file, so it does not need to be configured separately.
+with open(SERVICE_ACCOUNT_PRIVATE_FILE_PATH) as sa_file:
+    SERVICE_ACCOUNT_EMAIL = json.load(sa_file)["client_email"]
 
 TARGET_AUD = SERVICE_ACCOUNT_EMAIL
 
@@ -84,44 +86,83 @@ def get_id_token(signed_jwt):
     logging.info(res['id_token'])
     return res['id_token']
 
-def make_rest_get_call(signed_jwt, url):
-    """Makes an authorized request to the endpoint"""
-    headers = {
+
+# ---------------------------------------------------------------------------
+# Token reuse
+#
+# The Google ID token returned above is valid for one hour. You should REUSE
+# the same token for every API call and only mint a new one once the current
+# token is expired (or about to expire). Do NOT call generate_jwt() /
+# get_id_token() before every request -- that is unnecessary and slower.
+#
+# The helper below shows one simple way to do this: cache the token together
+# with its expiry time and hand back the cached token until it is close to
+# expiring, refreshing a few minutes early as a safety margin.
+# ---------------------------------------------------------------------------
+TOKEN_EXPIRY_SECONDS = 3600          # tokens are valid for one hour
+TOKEN_REFRESH_BUFFER_SECONDS = 300   # refresh 5 minutes early to be safe
+
+_cached_id_token = None
+_cached_id_token_expiry = 0  # epoch seconds at which the cached token expires
+
+
+def get_valid_id_token():
+    """Return a valid Google ID token, reusing the cached one until it nears
+    expiry.
+
+    A new JWT and ID token are generated only when nothing is cached yet or the
+    cached token is within TOKEN_REFRESH_BUFFER_SECONDS of expiring.
+    """
+    global _cached_id_token, _cached_id_token_expiry
+
+    now = int(time.time())
+    if _cached_id_token and now < (_cached_id_token_expiry - TOKEN_REFRESH_BUFFER_SECONDS):
+        logging.info("Reusing cached ID token (still valid).")
+        return _cached_id_token
+
+    logging.info("No valid ID token cached; generating a new one.")
+    signed_jwt = generate_jwt(sa_keyfile=SERVICE_ACCOUNT_PRIVATE_FILE_PATH,
+                              expiry_length=TOKEN_EXPIRY_SECONDS)
+    _cached_id_token = get_id_token(signed_jwt)
+    _cached_id_token_expiry = now + TOKEN_EXPIRY_SECONDS
+    return _cached_id_token
+
+
+def build_headers(signed_jwt):
+    """Build the authorization headers shared by every API request."""
+    return {
         'Authorization': 'Bearer {}'.format(signed_jwt),
         'content-type': 'application/json',
         'x-api-key': KEY,
         'Referer': 'https://api.equilar.com',
         'User-Agent': 'Mozilla/5.0'
     }
-    response = requests.get(url, headers=headers)
-    logging.info(f"get response: {response.text}")
+
+
+def make_rest_get_call(signed_jwt, url):
+    """Makes an authorized GET request to the endpoint"""
+    response = requests.get(url, headers=build_headers(signed_jwt))
     json_resp = json.dumps(response.json(), indent=2)
     logging.info(f"output:\n{json_resp}")
     return response.json()
 
+
 def make_rest_post_call(signed_jwt, url, data):
+    """Makes an authorized POST request to the endpoint"""
     logging.info(f"{url}:\ninput:\n{data}")
-    """Makes an authorized request to the endpoint"""
-    headers = {
-        'Authorization': 'Bearer {}'.format(signed_jwt),
-        'content-type': 'application/json',
-        'x-api-key': KEY,
-        'Referer': 'https://api.equilar.com',
-        'User-Agent': 'Mozilla/5.0'
-    }
-    response = requests.post(url, headers=headers, json=data)
+    response = requests.post(url, headers=build_headers(signed_jwt), json=data)
     json_resp = json.dumps(response.json(), indent=2)
     logging.info(f"output:\n{json_resp}")
     return response.json()
-    #response.raise_for_status()
 
 
 def main():
     url = 'https://'+ HOST +'/v2/org/search'
-    #We need not generate JWT every time as it is valid for 1 hour
-    signed_jwt = generate_jwt(sa_keyfile=SERVICE_ACCOUNT_PRIVATE_FILE_PATH)
-    id_token = get_id_token(signed_jwt)
-    
+    # Reuse the token across every call below. get_valid_id_token() only
+    # generates a new token when the cached one is missing or near expiry,
+    # so it is safe (and recommended) to call before each request.
+    id_token = get_valid_id_token()
+
     data = {"name":"Apple", "ticker":"AAPL", "websites":["apple.com"]}
     res = make_rest_post_call(signed_jwt=id_token, url=url, data=data)
 
@@ -136,6 +177,7 @@ def main():
     res = make_rest_get_call(signed_jwt=id_token, url=url)
 
     '''
+    '''
 
     url = 'https://'+ HOST +'/v2/person/bulkSearch'
     data = {}
@@ -143,19 +185,21 @@ def main():
     data["payload"].append({"firstName":"Sundar","lastName":"Pichai", "organizationName":"Alphabet Inc."})
     data["payload"].append({"firstName":"Satya","lastName":"Nadella", "organizationName":"Microsoft"})
     data["payload"].append({"firstName":"Shantanu","lastName":"Narayen", "organizationName":"Adobe"})
-    #make_rest_post_call(signed_jwt=id_token, url=url, data=data)
+    data["payload"].append({"firstName":"Elon","lastName":"Musk", "organizationName":"Tesla"})
+    make_rest_post_call(signed_jwt=id_token, url=url, data=data)
 
 
     url = 'https://'+ HOST +'/v2/org/bulkSearch'
     data = {}
     data["payload"] = []
     data["payload"].append({"name":"Intapp"})
-    data["payload"].append({"name": "Coinbase", "ticker":"COIN"})
+    data["payload"].append({"name": "Palantir", "ticker":"PLTR"})
     data["payload"].append({"websites":["ibm.com"]})
     data["payload"].append({"linkedInUrl":"https://www.linkedin.com/company/tredence"})
     data["payload"].append({"name": "Amgen", "websites":["amgen.com"]})
-    #make_rest_post_call(signed_jwt=id_token, url=url, data=data)
+    make_rest_post_call(signed_jwt=id_token, url=url, data=data)
 
+    '''
     '''
 
 
