@@ -1,5 +1,28 @@
-"""Example of calling a Google Cloud Endpoint API from Google App Engine
-Default Service Account using Google ID token."""
+"""Sample client demonstrating how to authenticate against and call the
+Equilar API.
+
+Equilar's APIs are fronted by a Google Cloud Endpoint and require two
+credentials on every request: an API key (sent as the `x-api-key` header) and a
+Google ID token (sent as a Bearer token). This script shows the full flow:
+
+  1. Sign a JWT with the service account's private key (`generate_jwt`).
+  2. Exchange that JWT for a short-lived Google ID token (`get_id_token`).
+  3. Reuse the ID token across requests until it nears expiry, only minting a
+     new one when needed (`get_valid_id_token`).
+  4. Make authenticated GET/POST calls with the shared headers
+     (`make_rest_get_call` / `make_rest_post_call`).
+
+The `main()` function exercises a few representative Equilar endpoints:
+
+  - POST /v2/org/search           - match an organization by name/ticker/website
+  - GET  /v2/org/executives/{id}  - list executives for the matched org
+  - POST /v2/person/bulkSearch    - resolve several people in one call
+  - POST /v2/org/bulkSearch       - resolve several organizations in one call
+
+Configuration (API key, service account file path, optional host) is read from
+a `.env` file; the service account email is derived from the JSON key file. See
+README.md for setup and the License.
+"""
 
 import http.client as httplib
 import json

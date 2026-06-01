@@ -1,8 +1,28 @@
 # Equilar API Sample Client
 
-`main.py` is a sample client that connects to Equilar's APIs using Google ID
-token authentication. It calls the Equilar org match API to find a matching
-organization and retrieves 10 executives for that organization.
+`main.py` is a sample client showing how to authenticate against and call the
+Equilar API. Equilar's APIs are fronted by a Google Cloud Endpoint and require
+two credentials on every request: an **API key** and a **Google ID token**.
+
+## What this sample demonstrates
+
+The full authentication flow:
+
+1. Sign a JWT with the service account's private key (`generate_jwt`).
+2. Exchange that JWT for a short-lived Google ID token (`get_id_token`).
+3. Reuse the ID token across requests until it nears expiry, only minting a new
+   one when needed (`get_valid_id_token`).
+4. Make authenticated GET/POST calls with the shared headers
+   (`make_rest_get_call` / `make_rest_post_call`).
+
+`main()` then exercises a few representative Equilar endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v2/org/search` | Match an organization by name, ticker, or website |
+| `GET /v2/org/executives/{id}` | List executives for the matched organization |
+| `POST /v2/person/bulkSearch` | Resolve several people in one call |
+| `POST /v2/org/bulkSearch` | Resolve several organizations in one call |
 
 ## Authentication
 
