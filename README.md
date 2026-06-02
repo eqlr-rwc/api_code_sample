@@ -54,8 +54,17 @@ the right thing automatically.
 
 The bulk endpoints (`/v2/person/bulkSearch` and `/v2/org/bulkSearch`) process
 the batch **asynchronously**. Instead of returning the data inline, they
-respond with a **Google Cloud Storage (GCS) signed URL** that points to a single
-result file. That same file is updated in place as the batch runs:
+respond with a **Google Cloud Storage (GCS) signed URL** (in the `signedURL`
+field) that points to a single result file:
+
+```json
+{
+  "status": 200,
+  "signedURL": "https://storage.googleapis.com/.../<id>.json?GoogleAccessId=...&Expires=...&Signature=..."
+}
+```
+
+That same file is updated in place as the batch runs:
 
 - **While processing**, the file holds a progress document:
 

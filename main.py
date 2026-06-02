@@ -276,10 +276,9 @@ def main():
     bulk_res = make_rest_post_call(signed_jwt=id_token, url=url, data=data)
 
     # A bulk request is processed asynchronously and responds with a GCS signed
-    # URL that points to the result file. Poll that file until the batch is done
-    # to retrieve the results. Adjust the key below if your API response uses a
-    # different field name for the signed URL.
-    signed_url = bulk_res.get("signedUrl") if isinstance(bulk_res, dict) else None
+    # URL (in the "signedURL" field) that points to the result file. Poll that
+    # file until the batch is done to retrieve the results.
+    signed_url = bulk_res.get("signedURL") if isinstance(bulk_res, dict) else None
     if signed_url:
         results = poll_signed_url(signed_url)
         logging.info(f"Bulk org search results:\n{json.dumps(results, indent=2)}")
