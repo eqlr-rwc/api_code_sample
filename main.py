@@ -176,6 +176,62 @@ def make_rest_post_call(signed_jwt, url, data):
     return response.json()
 
 
+# ---------------------------------------------------------------------------
+# Polling a GCS signed URL for batch (bulk) results
+#
+# The bulk endpoints (e.g. /v2/person/bulkSearch and /v2/org/bulkSearch) process
+# the batch asynchronously. Rather than returning the data inline, they respond
+# with a Google Cloud Storage (GCS) "signed URL" that points to a single result
+# file. That same file is updated in place as the batch runs:
+#
+#   * While processing, the file holds a progress document, e.g.:
+#         {"status": "Processing", "progress": "0/5"}
+#     where "progress" is "<completed>/<total>".
+#
+#   * Once the batch finishes, the SAME file is overwritten with the final JSON
+#     results (which no longer carry a "Processing" status).
+#
+# So the client just re-downloads the file on an interval until the
+# "Processing" status disappears, at which point the file holds the results.
+# ---------------------------------------------------------------------------
+POLL_INTERVAL_SECONDS = 5     # wait this long between polls
+POLL_TIMEOUT_SECONDS = 600    # give up after this many seconds (10 minutes)
+
+
+def poll_signed_url(signed_url, interval=POLL_INTERVAL_SECONDS, timeout=POLL_TIMEOUT_SECONDS):
+    """Poll a GCS signed URL until the batch finishes, then return the results.
+
+    Returns the parsed JSON results once the file is no longer in the
+    "Processing" state. Raises TimeoutError if the batch does not finish within
+    `timeout` seconds.
+
+    NOTE: A signed URL is pre-authenticated -- the credentials are baked into
+    the URL itself. Fetch it as a plain HTTP GET; do NOT attach the Equilar API
+    key or the Google ID token (those are only for api.equilar.cloud calls).
+    """
+    deadline = time.time() + timeout
+    while True:
+        response = requests.get(signed_url)  # no auth headers; the URL is signed
+        response.raise_for_status()
+        result = response.json()
+
+        # While the batch is running the file looks like:
+        #   {"status": "Processing", "progress": "3/5"}
+        if isinstance(result, dict) and result.get("status") == "Processing":
+            logging.info(f"Batch still processing: {result.get('progress')}")
+            if time.time() >= deadline:
+                raise TimeoutError(
+                    f"Batch did not finish within {timeout} seconds "
+                    f"(last progress: {result.get('progress')})."
+                )
+            time.sleep(interval)
+            continue
+
+        # No "Processing" status -> the file now holds the final results.
+        logging.info("Batch complete; results are ready.")
+        return result
+
+
 def main():
     url = 'https://'+ HOST +'/v2/org/search'
     # Reuse the token across every call below. get_valid_id_token() only
@@ -217,10 +273,19 @@ def main():
     data["payload"].append({"websites":["ibm.com"]})
     data["payload"].append({"linkedInUrl":"https://www.linkedin.com/company/tredence"})
     data["payload"].append({"name": "Amgen", "websites":["amgen.com"]})
-    make_rest_post_call(signed_jwt=id_token, url=url, data=data)
+    bulk_res = make_rest_post_call(signed_jwt=id_token, url=url, data=data)
 
-    '''
-    '''
+    # A bulk request is processed asynchronously and responds with a GCS signed
+    # URL that points to the result file. Poll that file until the batch is done
+    # to retrieve the results. Adjust the key below if your API response uses a
+    # different field name for the signed URL.
+    signed_url = bulk_res.get("signedUrl") if isinstance(bulk_res, dict) else None
+    if signed_url:
+        results = poll_signed_url(signed_url)
+        logging.info(f"Bulk org search results:\n{json.dumps(results, indent=2)}")
+    else:
+        logging.warning("No signed URL found in the bulkSearch response; "
+                        "update the key used to read it from the response.")
 
 
 if __name__ == '__main__':

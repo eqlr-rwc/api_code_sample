@@ -14,6 +14,9 @@ The full authentication flow:
    one when needed (`get_valid_id_token`).
 4. Make authenticated GET/POST calls with the shared headers
    (`make_rest_get_call` / `make_rest_post_call`).
+5. For bulk endpoints, poll the returned GCS signed URL until the batch
+   finishes and the results are ready (`poll_signed_url`). See
+   [Bulk endpoints and result polling](#bulk-endpoints-and-result-polling).
 
 `main()` then exercises a few representative Equilar endpoints:
 
@@ -46,6 +49,36 @@ along with its expiry time and returns the cached token until it is within a
 short refresh buffer of expiring (5 minutes, by default), at which point it
 transparently generates a new one. Call it wherever you need a token — it does
 the right thing automatically.
+
+## Bulk endpoints and result polling
+
+The bulk endpoints (`/v2/person/bulkSearch` and `/v2/org/bulkSearch`) process
+the batch **asynchronously**. Instead of returning the data inline, they
+respond with a **Google Cloud Storage (GCS) signed URL** that points to a single
+result file. That same file is updated in place as the batch runs:
+
+- **While processing**, the file holds a progress document:
+
+  ```json
+  {
+    "status": "Processing",
+    "progress": "0/5"
+  }
+  ```
+
+  where `progress` is `"<completed>/<total>"`.
+
+- **When finished**, the *same* file is overwritten with the final JSON
+  results (which no longer carry a `"Processing"` status).
+
+So after you receive the signed URL, **poll it**: re-download the file on an
+interval until the `"Processing"` status disappears — at that point the file
+contains your results. `main.py` demonstrates this with `poll_signed_url()`.
+
+> **Note:** A signed URL is pre-authenticated — the credentials are encoded in
+> the URL itself. Fetch it with a plain HTTP `GET`; do **not** attach the
+> Equilar API key or the Google ID token (those are only for
+> `api.equilar.cloud` requests).
 
 ## Endpoint
 
